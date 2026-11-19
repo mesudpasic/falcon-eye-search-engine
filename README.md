@@ -4,6 +4,20 @@ Falcon Eye Search Engine matches **one uploaded portrait** against a gallery of 
 
 A mask over the nose and mouth is a normal case. The detector still finds the face from the eyes, brows, and head shape. The similarity score is lower than a clear-to-clear match, so lower the similarity floor when the upload is masked.
 
+## Screens
+
+Search faces from photos. One portrait is compared with the enrolled gallery, or with a folder of photos.
+
+![Search faces from photos](docs/screenshots/search-faces-photos.png)
+
+Search faces from videos. One face is marked across the stretches of a video where it appears.
+
+![Search faces from videos](docs/screenshots/search-faces-videos.png)
+
+Search car plates from videos. License plates are read from a video and listed with the time range for each reading.
+
+![Search car plates from videos](docs/screenshots/search-plates-videos.png)
+
 ## Quick start
 
 Docker Desktop must be running.
@@ -69,7 +83,7 @@ backend/
 frontend/
   Dockerfile                Vue build, then nginx
   nginx.conf                Serves the app and proxies /api
-  src/App.vue               Mode switch: gallery, folder, video, plates
+  src/App.vue               Tabs: photos, video faces, video plates
   src/api.js                Calls the API
 data/photos/                Gallery JPEGs, named by SHA-1. Created at runtime.
 data/sources/               Folders uploaded from the browser.
@@ -231,12 +245,11 @@ The reader is FastALPR (a small ONNX detector plus an OCR model), baked into the
 
 ## Frontend
 
-The Vue app has four modes.
+The Vue app has three tabs.
 
-- **Gallery** drops or browses one photo and searches the enrolled set. The brass rectangle is the face that was embedded. Cards show the person, the match percentage, and the Commons credit. Paging and the similarity floor call `GET /api/search/{id}`.
-- **Folder** browses directories under `data`, or uploads a folder, then searches one face against that directory.
-- **Video face** takes a face and a video, plays the video locally, and lists time ranges. "Play from here" seeks the local file to that moment.
-- **Plates** takes a video and an optional plate, and lists each reading with its time range.
+- **Search faces from photos** drops or browses one photo and searches the enrolled gallery, or a folder under `data`. The brass rectangle is the face that was embedded. Cards show the person, the match percentage, and the Commons credit. Paging and the similarity floor call `GET /api/search/{id}`.
+- **Search faces from videos** takes a face and a video, plays the video locally, and lists time ranges. "Play from here" seeks the local file to that moment.
+- **Search car plates from videos** takes a video and an optional plate, and lists each reading with its time range.
 
 nginx proxies `/api/` to the API container and allows 2 GB request bodies so a CCTV file can be uploaded. The 10 MB limit still applies to a single face photo.
 
