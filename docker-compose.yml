@@ -1,0 +1,77 @@
+name: face-index
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: faces
+      POSTGRES_PASSWORD: faces
+      POSTGRES_DB: faces
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U faces -d faces"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    image: falcon-eye-engine-api:local
+    environment:
+      DATABASE_URL: postgresql://faces:faces@db:5432/faces
+      DATA_DIR: /data
+      PHOTO_DIR: /data/photos
+      INSIGHTFACE_ROOT: /models
+      MODEL_NAME: buffalo_l
+      DET_SIZE: "640"
+    volumes:
+      - ./data:/data
+    ports:
+      - "9081:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5).read()",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 120s
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    image: falcon-eye-engine-web:local
+    ports:
+      - "9080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  importer:
+    image: falcon-eye-engine-api:local
+    environment:
+      DATABASE_URL: postgresql://faces:faces@db:5432/faces
+      PHOTO_DIR: /data/photos
+      INSIGHTFACE_ROOT: /models
+      MODEL_NAME: buffalo_l
+      DET_SIZE: "640"
+    volumes:
+      - ./data:/data
+    command: ["python", "-m", "app.importer", "--target", "20000"]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  pgdata:
