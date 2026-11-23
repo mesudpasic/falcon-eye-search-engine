@@ -18,6 +18,10 @@ Search car plates from videos. License plates are read from a video and listed w
 
 ![Search car plates from videos](docs/screenshots/search-plates-videos.png)
 
+Live camera. A camera or a stream is watched for one face, for plates, or for both.
+
+![Live camera](docs/screenshots/search-live.png)
+
 ## Quick start
 
 Docker Desktop must be running.

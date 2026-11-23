@@ -8,5 +8,12 @@ data/photos/*
 !data/photos/.gitkeep
 data/jobs/
 frontend/node_modules/
+windows/**/bin/
+windows/**/obj/
+windows/publish/
+windows/dist/
+windows/.tools/
+windows/obfuscar.generated.xml
+windows/models/*.onnx
 frontend/dist/
 backend/tests/test_db.py
