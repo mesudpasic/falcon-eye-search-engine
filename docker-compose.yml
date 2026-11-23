@@ -1,26 +1,11 @@
 name: face-index
 
 services:
-  db:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_USER: faces
-      POSTGRES_PASSWORD: faces
-      POSTGRES_DB: faces
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U faces -d faces"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    restart: unless-stopped
-
   api:
     build: ./backend
     image: falcon-eye-engine-api:local
     environment:
-      DATABASE_URL: postgresql://faces:faces@db:5432/faces
+      DATABASE_PATH: /data/faces.db
       DATA_DIR: /data
       PHOTO_DIR: /data/photos
       INSIGHTFACE_ROOT: /models
@@ -30,9 +15,6 @@ services:
       - ./data:/data
     ports:
       - "9081:8000"
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test:
         [
@@ -60,7 +42,7 @@ services:
   importer:
     image: falcon-eye-engine-api:local
     environment:
-      DATABASE_URL: postgresql://faces:faces@db:5432/faces
+      DATABASE_PATH: /data/faces.db
       PHOTO_DIR: /data/photos
       INSIGHTFACE_ROOT: /models
       MODEL_NAME: buffalo_l
@@ -72,6 +54,3 @@ services:
       api:
         condition: service_healthy
     restart: "no"
-
-volumes:
-  pgdata:

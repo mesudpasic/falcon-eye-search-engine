@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
-    database_url: str = "postgresql://faces:faces@db:5432/faces"
+    database_path: str = "/data/faces.db"
     data_dir: str = "/data"
     photo_dir: str = "/data/photos"
     insightface_root: str = "/models"

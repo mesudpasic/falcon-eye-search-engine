@@ -2,8 +2,11 @@ __pycache__/
 *.py[cod]
 .venv/
 .env
+data/faces.db
+data/faces.db-*
 data/photos/*
 !data/photos/.gitkeep
 data/jobs/
 frontend/node_modules/
 frontend/dist/
+backend/tests/test_db.py

@@ -37,7 +37,7 @@ The `importer` service starts with the stack and enrolls up to 20,000 portraits.
 docker compose logs -f importer
 ```
 
-The demo password is `faces` / `faces`. It is for this local stack only.
+The gallery is the SQLite file `data/faces.db`. There is no database password.
 
 ## What happens on one upload
 
@@ -46,7 +46,7 @@ The demo password is `faces` / `faces`. It is for this local stack only.
 3. InsightFace `buffalo_l` finds faces. The largest face that is at least 48 pixels on each side is kept. SCRFD, the detector inside this model, still returns a box when the nose and mouth are covered.
 4. That face becomes one 512-number embedding. The numbers are L2-normalized.
 5. The embedding is saved under a search id for one day, so later pages do not upload or re-detect the photo.
-6. Postgres compares it with every enrolled embedding and returns one page of faces at or above the similarity floor.
+6. SQLite compares it with every enrolled embedding and returns one page of faces at or above the similarity floor.
 
 Photo files are not compared to each other. Only the embeddings are.
 
@@ -67,7 +67,7 @@ Default floor is 35%. Move it down to walk further through lookalikes. At 0% the
 
 ```
 LICENSE                     Noncommercial license for this application
-docker-compose.yml          Postgres, API, web, importer
+docker-compose.yml          API, web, importer
 backend/
   Dockerfile                Python image, InsightFace model baked in
   requirements.txt
@@ -93,16 +93,15 @@ data/jobs/                  Video scans and their snapshot frames.
 
 ## Services
 
-`docker-compose.yml` starts four services on one network.
+`docker-compose.yml` starts three services on one network.
 
 | Service | Image | Role | Port |
 |---|---|---|---|
-| `db` | `pgvector/pgvector:pg16` | Gallery rows, embeddings, search sessions | internal only |
 | `api` | built from `backend/` | FastAPI face search | http://localhost:9081 |
 | `web` | built from `frontend/` | Vue app via nginx | http://localhost:9080 |
 | `importer` | same image as `api` | Downloads and enrolls the demo gallery | none |
 
-Postgres data is the named volume `pgdata`. The `data` directory is a bind mount at `/data`. Gallery JPEGs stay in `data/photos`. Put another folder of images next to `photos` and choose it in the Folder search. Video scans and uploaded folders are stored under `data/jobs` and `data/sources`.
+The `data` directory is a bind mount at `/data`. The gallery database is `data/faces.db`. Gallery JPEGs stay in `data/photos`. Put another folder of images next to `photos` and choose it in the Folder search. Video scans and uploaded folders are stored under `data/jobs` and `data/sources`.
 
 The API loads the face model once at startup and keeps a single ONNX session. Recognition runs in a worker thread, one call at a time, so the event loop can keep serving photos and later pages while a search is in progress. Folder indexing, video scans, and a live camera share one queue so they do not run two heavy jobs at once. A live watch holds that queue until it stops. Run one API process per container.
 
@@ -116,23 +115,21 @@ It skips people already enrolled or already rejected.
 
 ## Database
 
-Postgres is the store because `pgvector` can keep the recognition embedding next to the file hash and sort by cosine distance. The demo user and database are both named `faces`.
+The gallery is one SQLite file, `data/faces.db`. Embeddings are 512-float blobs. [sqlite-vec](https://github.com/asg017/sqlite-vec) computes cosine distance, and a search keeps every face at or above the similarity floor. One hundred thousand faces is about 200 MB of embeddings. Scanning them is a few tens of milliseconds. The time you feel is still the detection of the uploaded face. An older Postgres volume is not copied into this file. Run the importer again to enroll the demo set.
 
 Tables, created by the API on startup:
 
-- `faces` — one enrolled portrait. `file_sha1` is unique. `wikidata_id` is unique so the demo keeps one photo per person. `embedding` is `vector(512)`.
+- `faces` — one enrolled portrait. `file_sha1` is unique. `wikidata_id` is unique so the demo keeps one photo per person. `embedding` is 512 float32 numbers.
 - `folder_files` — faces indexed from a chosen folder. The key is the folder path, the file path, and the face number in that image. Unchanged files are not embedded again. Gallery files whose name is already a SHA-1 reuse the enrolled embedding.
 - `searches` — the embedding for an upload, kept for 24 hours so paging does not repeat detection. Old rows are deleted when a new search is created.
 - `import_skips` — Wikidata ids that were rejected (no face, too small, not an image, download failed) so a resume does not fetch them again.
 - `gallery_meta` — the model name and embedding size used to build the gallery. Startup refuses to search if those do not match the running model and the gallery is not empty.
 
-An HNSW index is created on `embedding` when the server supports it. At this size the filtered "everyone above the floor" query is a short scan either way.
-
 Useful checks:
 
 ```bash
-docker compose exec db psql -U faces -d faces -c "SELECT count(*) FROM faces;"
-docker compose exec db psql -U faces -d faces -c "SELECT person_name, file_sha1 FROM faces ORDER BY id DESC LIMIT 5;"
+docker compose exec api python -c "import sqlite3; c=sqlite3.connect('/data/faces.db'); print(c.execute('select count(*) from faces').fetchone()[0])"
+docker compose exec api python -c "import sqlite3; c=sqlite3.connect('/data/faces.db'); [print(row) for row in c.execute('select person_name, file_sha1 from faces order by id desc limit 5')]"
 ```
 
 Reset enrolled faces and delete the JPEGs:
@@ -141,7 +138,7 @@ Reset enrolled faces and delete the JPEGs:
 docker compose run --rm importer python -m app.importer --reset --target 20000
 ```
 
-`docker compose down -v` drops the Postgres volume. It does not delete `data/photos`. Remove those files yourself if you want an empty folder.
+Deleting `data/faces.db` drops the gallery rows. It does not delete `data/photos`. Remove those files yourself if you want an empty folder.
 
 ## API
 
@@ -151,7 +148,7 @@ Base URL through the site is `http://localhost:9080/api`. The API is also publis
 
 ### `GET /api/health`
 
-Database check for Docker. `200` with `status`, `enrolled_faces`, and `model_name`. `503` if Postgres is down.
+Database check for Docker. `200` with `status`, `enrolled_faces`, and `model_name`. `503` if the gallery file cannot be opened.
 
 ### `GET /api/stats`
 
@@ -337,7 +334,7 @@ Set these on the `api` and `importer` services together. Search and enrollment m
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DATABASE_URL` | `postgresql://faces:faces@db:5432/faces` | Postgres connection |
+| `DATABASE_PATH` | `/data/faces.db` | SQLite gallery file |
 | `PHOTO_DIR` | `/data/photos` | Folder of `{sha1}.jpg` files |
 | `DATA_DIR` | `/data` | Root for folder browse, uploads, and video jobs |
 | `INSIGHTFACE_ROOT` | `/models` | Where the baked model pack lives |
@@ -388,7 +385,7 @@ docker compose down
 
 The first API start loads the ONNX session. The Docker health check allows 90 seconds before it counts failures. The web container waits until that check passes.
 
-A gallery of 20,000 faces is a small scan. The time you feel on a search is the one detection and embedding, typically well under a second after the model is loaded, plus the database sort. Paging and moving the similarity floor only repeat the database query.
+A gallery of 100,000 faces is a small scan for sqlite-vec. The time you feel on a search is the one detection and embedding, typically well under a second after the model is loaded, plus a pass over the stored embeddings. Paging and moving the similarity floor repeat that pass.
 
 Changing `MODEL_NAME` or `EMBEDDING_DIM` after faces exist will refuse to start until the gallery is reset. Old embeddings are not comparable with a new model.
 
