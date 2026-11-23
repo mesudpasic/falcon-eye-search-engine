@@ -120,3 +120,37 @@ export async function fetchJob(jobId, signal) {
   if (!response.ok) throw await readError(response, "Could not read scan progress.");
   return response.json();
 }
+
+export async function startLive({ source, watch, plate, file, minSimilarity, sampleFps, signal }) {
+  const body = new FormData();
+  body.append("source", source);
+  body.append("watch", watch);
+  body.append("plate", plate || "");
+  if (file) body.append("file", file);
+  const params = new URLSearchParams({
+    min_similarity: String(minSimilarity),
+    sample_fps: String(sampleFps),
+  });
+  const response = await fetch(`/api/live?${params}`, { method: "POST", body, signal });
+  if (!response.ok) throw await readError(response, "The camera watch failed.");
+  return response.json();
+}
+
+export async function fetchCurrentLive(signal) {
+  const response = await fetch("/api/live/current", { signal });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await readError(response, "Could not read the camera watch.");
+  return response.json();
+}
+
+export async function fetchLive(sessionId, signal) {
+  const response = await fetch(`/api/live/${sessionId}`, { signal });
+  if (!response.ok) throw await readError(response, "Could not read the camera watch.");
+  return response.json();
+}
+
+export async function stopLive(sessionId, signal) {
+  const response = await fetch(`/api/live/${sessionId}/stop`, { method: "POST", signal });
+  if (!response.ok) throw await readError(response, "Could not stop the camera.");
+  return response.json();
+}

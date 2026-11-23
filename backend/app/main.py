@@ -20,9 +20,11 @@ from app.db import (
 )
 from app.face_engine import FaceEngine, ImageRejected
 from app.jobs import JobStore
+from app.live import LiveHub
 from app.log import configure_logging
 from app.paths import ensure_data_dirs, purge_old_jobs
 from app.plate_engine import PlateEngine
+from app.routes_live import router as live_router
 from app.routes_scan import router as scan_router
 from app.schemas import (
     HealthResponse,
@@ -46,14 +48,16 @@ async def lifespan(app: FastAPI):
     app.state.jobs = JobStore()
     app.state.plates = PlateEngine()
     app.state.scan_lock = asyncio.Lock()
+    app.state.live = LiveHub()
     yield
+    await app.state.live.shutdown()
     await app.state.pool.close()
 
 
 app = FastAPI(
     title="Falcon Eye Search Engine",
     version="1.0.0",
-    summary="Match one portrait against a gallery, a folder, or a CCTV video.",
+    summary="Match one portrait against a gallery, a folder, a CCTV video, or a live camera.",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
     redoc_url=None,
@@ -61,6 +65,7 @@ app = FastAPI(
 )
 
 app.include_router(scan_router)
+app.include_router(live_router)
 
 app.add_middleware(
     CORSMiddleware,

@@ -75,6 +75,7 @@ backend/
   app/face_engine.py        Detect and embed faces
   app/scan_folder.py        Index a folder and search it
   app/scan_video.py         Face and plate scans over a video
+  app/live.py               Live camera and stream watch
   app/plate_engine.py       License-plate detector and OCR
   app/db.py                 Schema, search, paging
   app/importer.py           Wikimedia Commons demo import
@@ -83,7 +84,7 @@ backend/
 frontend/
   Dockerfile                Vue build, then nginx
   nginx.conf                Serves the app and proxies /api
-  src/App.vue               Tabs: photos, video faces, video plates
+  src/App.vue               Tabs: photos, video faces, video plates, live camera
   src/api.js                Calls the API
 data/photos/                Gallery JPEGs, named by SHA-1. Created at runtime.
 data/sources/               Folders uploaded from the browser.
@@ -103,7 +104,7 @@ data/jobs/                  Video scans and their snapshot frames.
 
 Postgres data is the named volume `pgdata`. The `data` directory is a bind mount at `/data`. Gallery JPEGs stay in `data/photos`. Put another folder of images next to `photos` and choose it in the Folder search. Video scans and uploaded folders are stored under `data/jobs` and `data/sources`.
 
-The API loads the face model once at startup and keeps a single ONNX session. Recognition runs in a worker thread, one call at a time, so the event loop can keep serving photos and later pages while a search is in progress. Folder indexing and video scans share one queue so they do not run two heavy jobs at once. Run one API process per container.
+The API loads the face model once at startup and keeps a single ONNX session. Recognition runs in a worker thread, one call at a time, so the event loop can keep serving photos and later pages while a search is in progress. Folder indexing, video scans, and a live camera share one queue so they do not run two heavy jobs at once. A live watch holds that queue until it stops. Run one API process per container.
 
 The importer does not restart after it exits. Resume a stopped import with:
 
@@ -241,15 +242,64 @@ Plates are their own search, not a face search. `POST /api/video/plates` takes t
 
 The reader is FastALPR (a small ONNX detector plus an OCR model), baked into the API image. The percentage on a plate is the reader's confidence, not a face similarity. This does not look the plate up in a registration database. It only reports the text it read and when in the video that text appeared.
 
+### Live camera
+
+`POST /api/live` watches a camera or a network stream instead of a file. The body is multipart:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `source` | yes | An `rtsp`, `rtsps`, `rtmp`, `rtmps`, `http`, `https`, `udp`, or `tcp` URL, or a camera number `0`–`16` (`camera:0` is the same as `0`) |
+| `watch` | no | `faces`, `plates`, or `both`. Default `both` |
+| `file` | when watching faces | The face to find. Same limits as a photo search |
+| `plate` | no | Keep readings that match this text or differ by one character. Blank lists every plate |
+
+Query `sample_fps` is 0.5–5 and defaults to 2. Query `min_similarity` defaults to 0.35 and applies to faces. The call returns immediately with a `session_id`. Poll `GET /api/live/{session_id}` about once a second. `status` is `starting`, `live`, `stopped`, or `error`. Hits use the same shape as a video time range, plus `kind` (`face` or `plate`). Times are seconds since the watch started. `GET /api/live/{session_id}/preview` is the latest JPEG (`preview_rev` on the status changes when a new one is ready). `POST /api/live/{session_id}/stop` ends it. `GET /api/live/current` is the watch still in memory, or `404`.
+
+One watch runs at a time. Starting another stops the previous one. The watch also stops when the stream has been down through three attempts, when you stop it, or after four hours. Frames are reduced the same way as a video, so a small face or plate can be missed. A password in the URL is used to open the stream and is not returned in `source`.
+
+A network address has to be reachable from the API container. Docker on a desktop can open an RTSP camera on the LAN. A webcam or HDMI capture card is a camera number only when that device is visible inside the container. Typing `0` on Docker Desktop for Windows fails with "No camera with that number was found", because the webcam stays on Windows. Drone FPV is the same idea: the goggles are not a URL until the receiver is restreamed or its HDMI goes through a capture card.
+
+On a Linux host the device can be passed through with:
+
+```yaml
+services:
+  api:
+    devices:
+      - /dev/video0:/dev/video0
+```
+
+### Laptop camera on Docker Desktop
+
+Publish the webcam on Windows, then give the Live camera tab `rtsp://host.docker.internal:8554/cam`. `host.docker.internal` is the Windows machine as seen from the container. Restarting Docker does not make a camera number work.
+
+ffmpeg's own RTSP listen (`-rtsp_flags listen` or `?listen=1`) does not open the port on Windows. The API then reports "That camera could not be opened" with `Connection refused` in the log. Run [MediaMTX](https://github.com/bluenviron/mediamtx) as the listener and have ffmpeg publish into it.
+
+Windows reserves some TCP ports (Hyper-V). MediaMTX exits if it cannot bind RTMP on 1935. Set `rtmp: false` in `mediamtx.yml` and leave RTSP on `:8554`.
+
+Find the camera name:
+
+```powershell
+ffmpeg -list_devices true -f dshow -i dummy
+```
+
+Start MediaMTX, then publish. A keyframe every second matters: the default GOP is several seconds long, and the API gives up on a read after 5 seconds.
+
+```powershell
+ffmpeg -f dshow -rtbufsize 50M -i video="USB2.0 FHD UVC WebCam" -an -r 15 -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -g 15 -keyint_min 15 -sc_threshold 0 -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/cam
+```
+
+Use the name from the device list in place of `USB2.0 FHD UVC WebCam`. Leave both programs running. Windows must allow desktop apps to use the camera. If the next error is a timeout instead of "connection refused", allow inbound TCP 8554 from the Docker network.
+
 `GET /api/media?path=` serves folder images and the snapshot frames. The path has to stay inside `data`.
 
 ## Frontend
 
-The Vue app has three tabs.
+The Vue app has four tabs.
 
 - **Search faces from photos** drops or browses one photo and searches the enrolled gallery, or a folder under `data`. The brass rectangle is the face that was embedded. Cards show the person, the match percentage, and the Commons credit. Paging and the similarity floor call `GET /api/search/{id}`.
 - **Search faces from videos** takes a face and a video, plays the video locally, and lists time ranges. "Play from here" seeks the local file to that moment.
 - **Search car plates from videos** takes a video and an optional plate, and lists each reading with its time range.
+- **Live camera** takes a stream address or a camera number, and lists faces and plates while the picture is open. Leaving the tab stops the watch.
 
 nginx proxies `/api/` to the API container and allows 2 GB request bodies so a CCTV file can be uploaded. The 10 MB limit still applies to a single face photo.
 

@@ -115,6 +115,34 @@ class GalleryBuildResult(BaseModel):
     skipped: int
 
 
+class LiveHit(BaseModel):
+    label: str
+    kind: str
+    start_seconds: float
+    end_seconds: float
+    start_label: str
+    end_label: str
+    score: float
+    match_percent: float
+    snapshot_url: str
+
+
+class LiveResponse(BaseModel):
+    session_id: UUID
+    status: str
+    message: str
+    error: str | None = None
+    source: str
+    watch: str
+    sample_fps: float
+    frames_checked: int
+    elapsed_seconds: float
+    elapsed_label: str
+    preview_rev: int
+    note: str = ""
+    hits: list[LiveHit]
+
+
 class JobResponse(BaseModel):
     job_id: UUID
     kind: str
